@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mi portafolio</title>
+<style>
+:root{--bg:#f7f5f0;--ink:#1d2327;--mute:#6b7378;--line:#d9d5cb;--acc:#1f5f5b;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#161a1c;--ink:#e8e6e0;--mute:#98a1a5;--line:#2c3336;--acc:#6fc3bb;--card:#1e2427}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:18px/1.7 Georgia,"Times New Roman",serif}
+main{max-width:720px;margin:0 auto;padding:56px 22px 120px}
+header{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+h1{font:700 clamp(2rem,6vw,3.2rem)/1.1 Georgia,serif;margin:0 0 10px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0}
+h2{font:700 1.7rem/1.25 Georgia,serif;margin:0 0 8px}
+p.t{margin:0;white-space:pre-wrap}
+figure{margin:0}
+img{max-width:100%;height:auto;display:block;border-radius:4px}
+figcaption{color:var(--mute);font-size:.9rem;margin-top:8px}
+.block{position:relative;margin:0 0 40px}
+[contenteditable=true]{outline:1px dashed var(--line);outline-offset:6px;border-radius:2px;min-height:1.2em}
+[contenteditable=true]:focus{outline:2px solid var(--acc)}
+[contenteditable=true]:empty:before{content:attr(data-ph);color:var(--mute)}
+.tools{display:none;gap:4px;margin-bottom:10px}
+body.edit .tools{display:flex}
+button{font:600 .8rem system-ui,sans-serif;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.add{display:none;gap:8px;flex-wrap:wrap;margin-top:20px}
+body.edit .add{display:flex}
+.bar{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;background:var(--card);border-top:1px solid var(--line);font:.85rem system-ui,sans-serif}
+#st{color:var(--mute)}
+#warn{background:#fff3cd;color:#5c4400;padding:12px 16px;font:.9rem system-ui,sans-serif;display:none}
+.empty{color:var(--mute);font-style:italic}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 data-site="title" data-ph="Tu nombre"></h1>
+    <p class="sub" data-site="sub" data-ph="Una línea sobre lo que haces"></p>
+  </header>
+  <div id="list"></div>
+  <div class="add">
+    <button data-add="title">+ Título</button>
+    <button data-add="text">+ Texto</button>
+    <button data-add="image">+ Imagen</button>
+  </div>
+  <input type="file" id="file" accept="image/*" hidden>
+</main>
+<div class="bar">
+  <span id="st">Conectando…</span>
+  <button id="toggle">Editar</button>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const list = $("#list"), st = $("#st");
+const status = t => st.textContent = t;
+let editing = false, pending = 0, ver = -1, order = [];
+const els = new Map(), timers = {};
+
+async function api(body) {
+  pending++; status("Guardando…");
+  try {
+    const r = await fetch("/api", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error(r.status);
+    apply(await r.json());
+    if (--pending === 0) status("Guardado ✓");
+  } catch (e) { pending--; console.error(e); status("Error al guardar"); }
+}
+function debounce(k, body) {
+  clearTimeout(timers[k]); status("Escribiendo…");
+  timers[k] = setTimeout(() => api(body), 600);
+}
+
+document.querySelectorAll("[data-site]").forEach(el => el.addEventListener("input",
+  () => debounce("s" + el.dataset.site, {op: "site", f: el.dataset.site, v: el.innerText.trim()})));
+
+function make(id) {
+  const box = document.createElement("section");
+  box.className = "block";
+  box.innerHTML = `<div class="tools">
+    <button data-a="up" title="Subir">↑</button><button data-a="down" title="Bajar">↓</button>
+    <button data-a="del">Eliminar</button></div><div class="body"></div>`;
+  box.addEventListener("click", e => {
+    const a = e.target.dataset.a; if (!a) return;
+    if (a === "del") { if (confirm("¿Eliminar este bloque?")) api({op: "del", id}); }
+    else api({op: "move", id, dir: a === "up" ? -1 : 1});
+  });
+  return box;
+}
+function fill(box, id, d) {
+  const body = box.querySelector(".body");
+  if (box.dataset.type !== d.type) {
+    box.dataset.type = d.type;
+    const ed = (tag, cls, f, ph) => `<${tag} class="${cls}" data-f="${f}" data-ph="${ph}"></${tag}>`;
+    body.innerHTML = d.type === "title" ? ed("h2", "", "text", "Título")
+      : d.type === "text" ? ed("p", "t", "text", "Escribe aquí…")
+      : `<figure><img alt=""><figcaption data-f="caption" data-ph="Pie de foto"></figcaption></figure>`;
+    body.querySelectorAll("[data-f]").forEach(el => el.addEventListener("input",
+      () => debounce(id + el.dataset.f, {op: "upd", id, f: el.dataset.f, v: el.innerText})));
+  }
+  body.querySelectorAll("[data-f]").forEach(el => {
+    if (document.activeElement !== el) el.textContent = d[el.dataset.f] || "";
+  });
+  const img = body.querySelector("img");
+  if (img && !img.getAttribute("src")) img.src = "/api?img=" + id;
+  setEditable();
+}
+function setEditable() {
+  document.querySelectorAll("[data-f],[data-site]").forEach(el => el.contentEditable = editing);
+  document.body.classList.toggle("edit", editing);
+  $("#toggle").textContent = editing ? "Terminar edición" : "Editar";
+}
+
+function apply(s) {
+  if (s.v === ver) return;
+  ver = s.v;
+  document.querySelectorAll("[data-site]").forEach(el => {
+    if (document.activeElement !== el) el.textContent = s.site[el.dataset.site] || "";
+  });
+  const items = [...s.blocks].sort((a, b) => a.order - b.order);
+  order = items;
+  const ids = new Set(items.map(i => i.id));
+  els.forEach((el, id) => { if (!ids.has(id)) { el.remove(); els.delete(id); } });
+  items.forEach(it => {
+    let box = els.get(it.id);
+    if (!box) { box = make(it.id); els.set(it.id, box); }
+    fill(box, it.id, it);
+    list.appendChild(box);
+  });
+  const emp = list.querySelector(".empty");
+  if (!items.length && !emp) list.insertAdjacentHTML("beforeend", '<p class="empty">Aún no hay contenido. Pulsa «Editar» para añadir el primer bloque.</p>');
+  else if (items.length && emp) emp.remove();
+}
+
+async function poll() {
+  if (pending) return;
+  try {
+    const r = await fetch("/api", {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    apply(await r.json());
+    if (!pending) status("En línea · sincronizado");
+  } catch (e) { status("Sin conexión con el servidor"); }
+}
+poll(); setInterval(poll, 3000);
+
+document.querySelectorAll("[data-add]").forEach(b => b.addEventListener("click", () => {
+  const type = b.dataset.add;
+  if (type === "image") return $("#file").click();
+  api({op: "add", type});
+}));
+
+$("#file").addEventListener("change", e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    const max = 1000, r = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    let q = .8, src = c.toDataURL("image/jpeg", q);
+    while (src.length > 1000000 && q > .3) src = c.toDataURL("image/jpeg", q -= .1);
+    if (src.length > 1000000) return alert("La imagen es demasiado grande. Prueba con una más pequeña.");
+    api({op: "add", type: "image", b64: src.split(",")[1]});
+  };
+  img.src = URL.createObjectURL(f);
+});
+
+$("#toggle").addEventListener("click", () => { editing = !editing; setEditable(); });
+setEditable();
+</script>
+</body>
+</html>
