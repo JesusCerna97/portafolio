@@ -29,7 +29,7 @@ export default async (req) => {
   const clip = (t) => String(t ?? "").slice(0, 20000);
 
   if (b.op === "site" && ["title", "sub"].includes(b.f)) s.site[b.f] = clip(b.v);
-  else if (b.op === "add" && ["title", "text", "image"].includes(b.type)) {
+  else if (b.op === "add" && ["title", "text", "image", "divider"].includes(b.type)) {
     const id = crypto.randomUUID();
     const blk = { id, type: b.type, text: "", caption: "", order: Date.now() };
     if (b.type === "image") {
@@ -42,6 +42,20 @@ export default async (req) => {
   else if (b.op === "upd" && ["text", "caption"].includes(b.f)) {
     const k = s.blocks.find((x) => x.id === b.id);
     if (k) k[b.f] = clip(b.v);
+  }
+  else if (b.op === "style") {
+    const k = s.blocks.find((x) => x.id === b.id), v = b.v;
+    const ok = {
+      align: (v) => ["left", "center", "right"].includes(v),
+      font: (v) => ["serif", "sans", "mono"].includes(v),
+      size: (v) => Number.isFinite(v) && v >= 10 && v <= 120,
+      width: (v) => Number.isFinite(v) && v >= 10 && v <= 100,
+      bold: (v) => typeof v === "boolean",
+      italic: (v) => typeof v === "boolean",
+      color: (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)
+    }[b.f];
+    if (!k || !ok || !ok(v)) return J({ error: "estilo no válido" }, 400);
+    k.st = { ...(k.st || {}), [b.f]: v };
   }
   else if (b.op === "del") {
     s.blocks = s.blocks.filter((x) => x.id !== b.id);

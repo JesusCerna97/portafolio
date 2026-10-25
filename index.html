@@ -34,6 +34,15 @@ body.edit .add{display:flex}
 #st{color:var(--mute)}
 #warn{background:#fff3cd;color:#5c4400;padding:12px 16px;font:.9rem system-ui,sans-serif;display:none}
 .empty{color:var(--mute);font-style:italic}
+.tools{flex-wrap:wrap;align-items:center}
+.fmt{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.tools label{font:.8rem system-ui,sans-serif;color:var(--mute);display:flex;gap:6px;align-items:center}
+input[type=range]{width:90px;accent-color:var(--acc)}
+input[type=color]{width:34px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--card);cursor:pointer}
+select{font:.8rem system-ui,sans-serif;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button.on{background:var(--acc);color:var(--bg);border-color:var(--acc)}
+hr{border:0;border-top:1px solid var(--line);margin:0}
+.body{overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -47,6 +56,7 @@ body.edit .add{display:flex}
     <button data-add="title">+ Título</button>
     <button data-add="text">+ Texto</button>
     <button data-add="image">+ Imagen</button>
+    <button data-add="divider">+ Separador</button>
   </div>
   <input type="file" id="file" accept="image/*" hidden>
 </main>
@@ -79,19 +89,84 @@ function debounce(k, body) {
 document.querySelectorAll("[data-site]").forEach(el => el.addEventListener("input",
   () => debounce("s" + el.dataset.site, {op: "site", f: el.dataset.site, v: el.innerText.trim()})));
 
+const busy = new Map();
+const AL = `<button data-s="align" data-v="left">Izq</button><button data-s="align" data-v="center">Centro</button><button data-s="align" data-v="right">Der</button>`;
+const FMT = {
+  title: AL + `<label>Tamaño <input type="range" data-r="size" min="14" max="96"></label><button data-t="bold" title="Negrita"><b>N</b></button><button data-t="italic" title="Cursiva"><i>C</i></button><input type="color" data-r="color" title="Color"><select data-sel="font" title="Tipografía"><option value="serif">Serif</option><option value="sans">Sans</option><option value="mono">Mono</option></select>`,
+  image: AL + `<label>Ancho <input type="range" data-r="width" min="10" max="100"></label>`,
+  divider: ""
+};
+FMT.text = FMT.title;
+const FONTS = {serif: 'Georgia,"Times New Roman",serif', sans: 'system-ui,-apple-system,"Segoe UI",sans-serif', mono: 'ui-monospace,Menlo,Consolas,monospace'};
+
 function make(id) {
   const box = document.createElement("section");
   box.className = "block";
-  box.innerHTML = `<div class="tools">
-    <button data-a="up" title="Subir">↑</button><button data-a="down" title="Bajar">↓</button>
-    <button data-a="del">Eliminar</button></div><div class="body"></div>`;
+  box.innerHTML = `<div class="tools"><button data-a="up" title="Subir">↑</button><button data-a="down" title="Bajar">↓</button><button data-a="del">Eliminar</button><span class="fmt"></span></div><div class="body"></div>`;
   box.addEventListener("click", e => {
-    const a = e.target.dataset.a; if (!a) return;
+    const bt = e.target.closest("button"); if (!bt) return;
+    const a = bt.dataset.a, it = order.find(o => o.id === id); if (!it) return;
     if (a === "del") { if (confirm("¿Eliminar este bloque?")) api({op: "del", id}); }
-    else api({op: "move", id, dir: a === "up" ? -1 : 1});
+    else if (a) api({op: "move", id, dir: a === "up" ? -1 : 1});
+    else if (bt.dataset.s) setStyle(id, bt.dataset.s, bt.dataset.v);
+    else if (bt.dataset.t) {
+      const s = it.st || {};
+      const cur = bt.dataset.t === "bold" ? (s.bold ?? it.type === "title") : !!s.italic;
+      setStyle(id, bt.dataset.t, !cur);
+    }
   });
+  box.addEventListener("input", e => {
+    const k = e.target.dataset.r;
+    if (k) setStyle(id, k, k === "color" ? e.target.value : +e.target.value);
+  });
+  box.addEventListener("change", e => { if (e.target.dataset.sel) setStyle(id, e.target.dataset.sel, e.target.value); });
   return box;
 }
+
+function paint(box, it) {
+  const s = it.st || {}, t = it.type, body = box.querySelector(".body"), al = s.align || "left";
+  const bold = s.bold ?? t === "title", size = s.size || (t === "title" ? 28 : 18);
+  body.style.textAlign = al;
+  if (t === "image") {
+    const fg = body.querySelector("figure");
+    fg.style.width = (s.width || 100) + "%";
+    fg.style.marginLeft = al === "left" ? "0" : "auto";
+    fg.style.marginRight = al === "right" ? "0" : "auto";
+  } else if (t !== "divider") {
+    const e = body.querySelector("[data-f]");
+    e.style.fontSize = size + "px";
+    e.style.fontWeight = bold ? 700 : 400;
+    e.style.fontStyle = s.italic ? "italic" : "normal";
+    e.style.color = s.color || "";
+    e.style.fontFamily = FONTS[s.font] || "";
+  }
+  const f = box.querySelector(".fmt");
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const val = {size, width: s.width || 100, color: s.color || (dark ? "#e8e6e0" : "#1d2327")};
+  f.querySelectorAll("[data-s]").forEach(b => b.classList.toggle("on", b.dataset.v === al));
+  f.querySelector("[data-t=bold]")?.classList.toggle("on", !!bold);
+  f.querySelector("[data-t=italic]")?.classList.toggle("on", !!s.italic);
+  f.querySelectorAll("[data-r]").forEach(r => {
+    if (r === document.activeElement) return;
+    if (r.dataset.r === "size") r.max = t === "text" ? 48 : 96;
+    r.value = val[r.dataset.r];
+  });
+  const sel = f.querySelector("select"); if (sel) sel.value = s.font || "serif";
+}
+
+function setStyle(id, f, v) {
+  const it = order.find(o => o.id === id); if (!it) return;
+  it.st = {...(it.st || {}), [f]: v};
+  paint(els.get(id), it);
+  if (!busy.has(id)) busy.set(id, new Set());
+  busy.get(id).add(f);
+  clearTimeout(timers[id + f]); status("Escribiendo…");
+  const t = timers[id + f] = setTimeout(async () => {
+    await api({op: "style", id, f, v});
+    if (timers[id + f] === t) busy.get(id)?.delete(f);
+  }, 400);
+}
+
 function fill(box, id, d) {
   const body = box.querySelector(".body");
   if (box.dataset.type !== d.type) {
@@ -99,7 +174,9 @@ function fill(box, id, d) {
     const ed = (tag, cls, f, ph) => `<${tag} class="${cls}" data-f="${f}" data-ph="${ph}"></${tag}>`;
     body.innerHTML = d.type === "title" ? ed("h2", "", "text", "Título")
       : d.type === "text" ? ed("p", "t", "text", "Escribe aquí…")
+      : d.type === "divider" ? "<hr>"
       : `<figure><img alt=""><figcaption data-f="caption" data-ph="Pie de foto"></figcaption></figure>`;
+    box.querySelector(".fmt").innerHTML = FMT[d.type];
     body.querySelectorAll("[data-f]").forEach(el => el.addEventListener("input",
       () => debounce(id + el.dataset.f, {op: "upd", id, f: el.dataset.f, v: el.innerText})));
   }
@@ -108,6 +185,7 @@ function fill(box, id, d) {
   });
   const img = body.querySelector("img");
   if (img && !img.getAttribute("src")) img.src = "/api?img=" + id;
+  if (!busy.get(id)?.size) paint(box, d);
   setEditable();
 }
 function setEditable() {
